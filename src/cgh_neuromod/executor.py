@@ -14,13 +14,13 @@ class CommandExecutor(QObject):
 
     def __init__(self, dev, cwd, cmp, path, logger=None):
         super().__init__()
+        self.logg = logger or self.setup_logging()
         self.devs = dev
         self.vw = cwd
         self.ctrl_panel = self.vw.ctrl_panel
         self.viewer = self.vw.viewer
         self.cgh = cmp.cgh
         self.path = path
-        self.logg = logger or self.setup_logging()
         self._set_signal_executions()
         self._initial_setup()
         self.task_worker = None
