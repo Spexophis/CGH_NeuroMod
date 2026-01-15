@@ -431,32 +431,6 @@ class DialogWidget(QtWidgets.QDialog):
             event.ignore()
 
 
-class MessageBoxWidget(QtWidgets.QMessageBox):
-    def __init__(self, title, message):
-        super().__init__()
-        self.setWindowTitle(title)
-        self.setText(message)
-        self.setStandardButtons(QtWidgets.QMessageBox.StandardButton.NoButton)
-        self.setIcon(QtWidgets.QMessageBox.Icon.Critical)
-        self.setStyleSheet("""
-            QMessageBox {
-                background-color: #121212;
-                color: #EEEEEE;
-                text-align: center;
-            }
-            QLabel {
-                color: #EEEEEE;
-            }
-        """)
-
-
-def create_dock(name=''):
-    dock = DockWidget(name)
-    group = GroupWidget()
-    dock.setWidget(group)
-    return dock, group
-
-
 def create_scroll_area(layout="F"):
     scroll_area = ScrollAreaWidget()
     content_widget = QtWidgets.QWidget(scroll_area)
