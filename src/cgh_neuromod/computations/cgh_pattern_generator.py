@@ -169,9 +169,9 @@ class CGH:
         phase_init = self.generate_cgh(spots_sample, include_defocus=False)
         sigma_spot = 0.1e-6
         target_amp = self.build_target_amp_from_spots(spots_sample, sigma=sigma_spot, amp_per_spot=1.0)
-        self.phase_spots = self.gerchberg_saxton_with_target(target_amp, n_iters=128, phase_init=phase_init,
-                                                             use_pupil_mask=True)
-        phase_fresnel_lens = self.generate_fresnel_lens_phase(focal_length=self.system.f_fresnel)
+        self.phase_spots = self.gerchberg_saxton_with_target(target_amp, n_iters=128,
+                                                             phase_init=phase_init, use_pupil_mask=True)
+        phase_fresnel_lens = self.generate_fresnel_lens_phase()
         self.phase_total = (self.phase_spots + phase_fresnel_lens) % (2.0 * np.pi)
         self.phase_slm = self.device.correction_pattern + phase_to_uint(self.phase_total, self.device.correction_value)
 
@@ -348,14 +348,9 @@ class CGH:
         phase_slm = (phase_slm + 2.0 * np.pi) % (2.0 * np.pi)
         return phase_slm
 
-    def generate_fresnel_lens_phase(self, focal_length):
+    def generate_fresnel_lens_phase(self):
         """
         Generate a Fresnel lens phase pattern
-
-        Parameters
-        ----------
-        focal_length : float
-            Desired focal length of the virtual lens
 
         Returns
         -------
@@ -368,6 +363,6 @@ class CGH:
         X, Y = np.meshgrid(x, y)
 
         k = 2.0 * np.pi / self.system.wavelength
-        phi = -k * (X ** 2 + Y ** 2) / (2.0 * focal_length)
+        phi = -k * (X ** 2 + Y ** 2) / (2.0 * self.system.f_fresnel)
         phase = np.mod(phi, 2.0 * np.pi)
         return phase
