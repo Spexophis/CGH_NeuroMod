@@ -6,11 +6,18 @@
 import ctypes
 from ctypes import c_int32, c_uint8, c_uint32, c_double, c_char, POINTER, create_string_buffer
 
+from cgh_neuromod import logger
 
-class SLMDriver:
-    def __init__(self, lib_path):
-        self.lib = ctypes.CDLL(lib_path)
-        self._bind_functions()
+
+class HamamatsuSLM:
+
+    def __init__(self, lib_path=None, logg=None):
+        self.logg = logg or logger.setup_logging()
+        if lib_path is not None:
+            self.lib = ctypes.CDLL(lib_path)
+            self._bind_functions()
+        else:
+            self.logg.error("No lib path specified")
 
     def _bind_functions(self):
         # Open_Dev

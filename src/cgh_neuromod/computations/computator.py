@@ -4,11 +4,11 @@
 
 
 from . import cgh_pattern_generator
-
+from cgh_neuromod import logger
 
 class ComputationManager:
     def __init__(self, logg=None):
-        self.logg = logg or self.setup_logging()
+        self.logg = logg or logger.setup_logging()
         self.cgh = cgh_pattern_generator.CGH(logg=self.logg)
 
     @staticmethod

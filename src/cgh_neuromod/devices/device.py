@@ -4,14 +4,14 @@
 
 
 from . import hamamatsu_slm
-
+from cgh_neuromod import logger
 
 class DeviceManager:
     def __init__(self, logg=None, path=None):
-        self.logg = logg or self.setup_logging()
+        self.logg = logg or logger.setup_logging()
         self.data_folder = path
         try:
-            self.slm = hamamatsu_slm.HamamatsuSLM(logg=self.logg)
+            self.slm = hamamatsu_slm.HamamatsuSLM(lib_path=None, logg=self.logg)
         except Exception as e:
             self.logg.error(f"{e}")
         self.logg.info("Finish initiating devices")

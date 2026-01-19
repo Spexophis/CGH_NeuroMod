@@ -4,16 +4,18 @@
 
 
 import sys
+import traceback
 
+from PyQt6 import QtGui
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import QApplication, QMainWindow
 
+from cgh_neuromod import logger
 from . import controller_panel, image_viewer
 from . import custom_widgets as cw
-import traceback
-from PyQt6 import QtGui
 
 _orig = QtGui.QFont.setPointSize
+
 
 def patched(self, size):
     if size <= 0:
@@ -22,17 +24,20 @@ def patched(self, size):
         traceback.print_stack(limit=30)
     return _orig(self, size)
 
+
 QtGui.QFont.setPointSize = patched
+
 
 class MainWindow(QMainWindow):
     aboutToClose = pyqtSignal()
 
-    def __init__(self, logg=None, path=None):
+    def __init__(self, path=None, logg=None):
         super().__init__()
-        self.logg = logg or self.setup_logging()
+        self.logg = logg or logger.setup_logging()
         self.data_folder = path
         self._set_dark_theme()
         self._setup_ui()
+        self._set_signal_connections()
         self.dialog, self.dialog_text = None, None
 
     @staticmethod
@@ -46,13 +51,16 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
     def _setup_ui(self):
-        self.ctrl_panel = controller_panel.ControlPanel(self.logg, self.data_folder)
+        self.ctrl_panel = controller_panel.ControlPanel(self.data_folder, self.logg)
         self.ctrl_dock = cw.DockWidget("Control Panel")
         self.ctrl_dock.setWidget(self.ctrl_panel)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.ctrl_dock)
 
         self.viewer = image_viewer.ImgViewer(self.logg)
         self.setCentralWidget(self.viewer)
+
+    def _set_signal_connections(self):
+        self.ctrl_panel.Signal_pick_spot.connect(self.viewer.start_target_picking)
 
     def _set_dark_theme(self):
         dark_stylesheet = """

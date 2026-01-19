@@ -4,14 +4,17 @@
 
 import datetime
 import getpass
-import logging
 import os
 import sys
+
 from PyQt6.QtWidgets import QApplication
-from .devices import device
+
+from . import logger
 from . import executor
-from .gui import main_window
 from .computations import computator
+from .devices import device
+from .gui import main_window
+
 
 def setup_folder():
     documents_dir = os.path.join(os.path.expanduser('~'), 'Documents', 'CGH_Data')
@@ -27,25 +30,6 @@ def setup_folder():
     return full_path
 
 
-def setup_logger(log_path):
-    today = datetime.datetime.now()
-    log_name = today.strftime("%Y%m%d_%H%M.log")
-    log_file = os.path.join(log_path, log_name)
-    logging.basicConfig(level=logging.INFO,
-                        format='%(asctime)s.%(msecs)03d %(levelname)s %(module)s - %(funcName)s: %(message)s',
-                        datefmt='%Y-%m-%d %H:%M:%S',
-                        filename=log_file,
-                        filemode='w')
-    logger = logging.getLogger('shared_logger')
-    ch = logging.StreamHandler()
-    ch.setLevel(logging.ERROR)
-    formatter = logging.Formatter('%(asctime)s.%(msecs)03d %(levelname)s %(module)s - %(funcName)s: %(message)s')
-    ch.setFormatter(formatter)
-    logger.addHandler(ch)
-    logger.info("Logger initialized.")
-    return logger
-
-
 class AppWrapper:
     def __init__(self):
         self.app = QApplication(sys.argv)
@@ -57,10 +41,10 @@ class AppWrapper:
         QSpinBox { background-color: #222; color: #f0f0f0; border: 1px solid #333; }
         """)
         self.data_folder = setup_folder()
-        self.error_logger = setup_logger(self.data_folder)
-        self.devices = device.DeviceManager(logg=self.error_logger, path=self.data_folder)
+        self.error_logger = logger.setup_logger(self.data_folder)
+        self.devices = device.DeviceManager(path=self.data_folder, logg=self.error_logger)
         self.cmp = computator.ComputationManager(logg=self.error_logger)
-        self.mwd = main_window.MainWindow(logg=self.error_logger, path=self.data_folder)
+        self.mwd = main_window.MainWindow(path=self.data_folder, logg=self.error_logger)
         self.cmd_exc = executor.CommandExecutor(self.devices, self.mwd, self.cmp, self.data_folder, self.error_logger)
         self.mwd.aboutToClose.connect(self.close)
 

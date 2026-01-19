@@ -4,17 +4,17 @@
 
 
 from PyQt6.QtCore import QObject, pyqtSlot, pyqtSignal
-
+from cgh_neuromod import logger
 from . import run_threads
 
 
 class CommandExecutor(QObject):
     svd = pyqtSignal(str)
-    psv = pyqtSignal(str)
+    task_finished = pyqtSignal()
 
-    def __init__(self, dev, cwd, cmp, path, logger=None):
+    def __init__(self, dev, cwd, cmp, path, logg=None):
         super().__init__()
-        self.logg = logger or self.setup_logging()
+        self.logg = logg or logger.setup_logging()
         self.devs = dev
         self.vw = cwd
         self.ctrl_panel = self.vw.ctrl_panel
@@ -35,6 +35,8 @@ class CommandExecutor(QObject):
         self.ctrl_panel.Signal_load_target.connect(self.load_cgh_target)
         self.ctrl_panel.Signal_compute_cgh.connect(self.run_cgh_computation)
         self.ctrl_panel.Signal_save_pattern.connect(self.save_cgh_pattern)
+        self.task_finished.connect(self.show_cgh_pattern)
+        self.viewer.spots_picked.connect(self.cgh.load_spots_picked)
 
     def _initial_setup(self):
         try:
@@ -55,18 +57,30 @@ class CommandExecutor(QObject):
         self.task_worker = None
         w.deleteLater()
         self.ctrl_panel.dialog.close()
+        self.task_finished.emit()
 
     @pyqtSlot(str)
     def load_cgh_target(self, fd):
-        pass
+        self.cgh.load_mask(fd)
+        self.viewer.set_target_image(self.cgh.mask)
+
+    @pyqtSlot()
+    def update_cgh_parameters(self):
+        n, m, f, c = self.ctrl_panel.get_cgh_parameters()
+        self.cgh.update_parameters(n, m, f * 1e-3, c)
 
     @pyqtSlot(str)
     def save_cgh_pattern(self, fd):
-        pass
+        self.cgh.save_cgh(str(self.path + r"\\" + fd))
+
+    @pyqtSlot()
+    def show_cgh_pattern(self):
+        self.viewer.set_pattern_image(self.cgh.phase_total)
 
     def cgh_computation(self):
         try:
-            pass
+            self.update_cgh_parameters()
+            self.cgh.compute_cgh()
         except Exception as e:
             self.logg.error(f"Error Running CGH Computation: {e}")
             return
