@@ -176,7 +176,7 @@ class CGH:
         self.phase_slm = self.device.correction_pattern + phase_to_uint(self.phase_total, self.device.correction_value)
 
     def save_cgh(self, fnd):
-        save_to_bmp(fnd, self.phase_total)
+        save_to_bmp(fnd, self.phase_slm)
 
     def generate_cgh(self, spots_sample: List[Tuple[float, float, float]], weights: List[complex] = None,
                      include_defocus: bool = True):

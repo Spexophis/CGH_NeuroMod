@@ -35,6 +35,7 @@ class CommandExecutor(QObject):
         self.ctrl_panel.Signal_load_target.connect(self.load_cgh_target)
         self.ctrl_panel.Signal_compute_cgh.connect(self.run_cgh_computation)
         self.ctrl_panel.Signal_save_pattern.connect(self.save_cgh_pattern)
+        self.ctrl_panel.Signal_slm_correction.connect(self.load_slm_correction)
         self.task_finished.connect(self.show_cgh_pattern)
         self.viewer.spots_picked.connect(self.cgh.load_spots_picked)
 
@@ -66,7 +67,8 @@ class CommandExecutor(QObject):
 
     @pyqtSlot()
     def update_cgh_parameters(self):
-        n, m, f, c = self.ctrl_panel.get_cgh_parameters()
+        n, m, c = self.ctrl_panel.get_cgh_parameters()
+        o, f = self.ctrl_panel.get_slm_parameters()
         self.cgh.update_parameters(n, m, f * 1e-3, c)
 
     @pyqtSlot(str)
@@ -87,3 +89,8 @@ class CommandExecutor(QObject):
 
     def run_cgh_computation(self):
         self.run_task(task=self.cgh_computation)
+
+    @pyqtSlot(str)
+    def load_slm_correction(self, fd: str):
+        self.cgh.load_correction_pattern(fd)
+        self.viewer.set_pattern_image(self.cgh.device.correction_pattern)

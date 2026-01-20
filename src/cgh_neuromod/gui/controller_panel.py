@@ -34,6 +34,7 @@ class ControlPanel(QWidget):
     Signal_pick_spot = pyqtSignal()
     Signal_compute_cgh = pyqtSignal()
     Signal_save_pattern = pyqtSignal(str)
+    Signal_slm_correction = pyqtSignal(str)
     Signal_slm_load = pyqtSignal(str)
     Signal_slm_set = pyqtSignal()
 
@@ -66,7 +67,7 @@ class ControlPanel(QWidget):
         self.QPushButton_CGH_Load = cw.PushButtonWidget('Load Target')
         self.QPushButton_CGH_Pick = cw.PushButtonWidget('Pick Spots')
         self.QSpinBox_CGH_Iteration = cw.SpinBoxWidget(0, 1024, 1, 128)
-        self.QSpinBox_CGH_Magnification = cw.SpinBoxWidget(0, 1024, 1, 20)
+        self.QDoubleSpinBox_CGH_Magnification = cw.DoubleSpinBoxWidget(0, 128, 1, 1, 7)
         self.QSpinBox_CGH_CenterX = cw.SpinBoxWidget(0, 2048, 1, 600)
         self.QSpinBox_CGH_CenterY = cw.SpinBoxWidget(0, 2048, 1, 395)
         self.QPushButton_CGH_Compute = cw.PushButtonWidget('Compute CGH')
@@ -79,7 +80,7 @@ class ControlPanel(QWidget):
         cgh_scroll_layout.addWidget(cw.LabelWidget(str('Iterations')), 2, 1, 1, 1)
         cgh_scroll_layout.addWidget(self.QSpinBox_CGH_Iteration, 2, 2, 1, 1)
         cgh_scroll_layout.addWidget(cw.LabelWidget(str('Magnification')), 3, 1, 1, 1)
-        cgh_scroll_layout.addWidget(self.QSpinBox_CGH_Magnification, 3, 2, 1, 1)
+        cgh_scroll_layout.addWidget(self.QDoubleSpinBox_CGH_Magnification, 3, 2, 1, 1)
         cgh_scroll_layout.addWidget(cw.LabelWidget(str('Center-X')), 4, 1, 1, 1)
         cgh_scroll_layout.addWidget(self.QSpinBox_CGH_CenterX, 4, 2, 1, 1)
         cgh_scroll_layout.addWidget(cw.LabelWidget(str('Center-Y')), 5, 1, 1, 1)
@@ -96,17 +97,18 @@ class ControlPanel(QWidget):
         group = cw.GroupWidget()
         slm_scroll_area, slm_scroll_layout = cw.create_scroll_area("G")
 
-        self.QPushButton_SLM_Load = cw.PushButtonWidget('Load Correction')
+        self.QPushButton_SLM_Correction = cw.PushButtonWidget('Load Correction')
         self.QPushButton_SLM_Load = cw.PushButtonWidget('Load Pattern')
         self.QPushButton_SLM_Set = cw.PushButtonWidget('Apply Pattern')
         self.QSpinBox_SLM_OffsetX = cw.SpinBoxWidget(0, 1024, 1, 0)
         self.QSpinBox_SLM_OffsetY = cw.SpinBoxWidget(0, 1024, 1, 0)
-        self.DoubleSpinBo_SLM_Focal = cw.DoubleSpinBoxWidget(0, 2000, 1, 2, 180)
+        self.QDoubleSpinBox_SLM_Focal = cw.DoubleSpinBoxWidget(0, 2000, 1, 2, 180)
 
         slm_scroll_layout.addWidget(cw.LabelWidget(str('Hamamatsu SLM')), 0, 0, 1, 1)
         slm_scroll_layout.addWidget(cw.FrameWidget(), 1, 0, 1, 3)
-        slm_scroll_layout.addWidget(self.QPushButton_SLM_Load, 2, 0, 1, 1)
-        slm_scroll_layout.addWidget(self.QPushButton_SLM_Set, 3, 0, 1, 1)
+        slm_scroll_layout.addWidget(self.QPushButton_SLM_Correction, 2, 0, 1, 1)
+        slm_scroll_layout.addWidget(self.QPushButton_SLM_Load, 3, 0, 1, 1)
+        slm_scroll_layout.addWidget(self.QPushButton_SLM_Set, 4, 0, 1, 1)
         slm_scroll_layout.addWidget(cw.LabelWidget(str('Offset X')), 2, 1, 1, 1)
         slm_scroll_layout.addWidget(self.QSpinBox_SLM_OffsetX, 2, 2, 1, 1)
         slm_scroll_layout.addWidget(cw.LabelWidget(str('Offset Y')), 3, 1, 1, 1)
@@ -114,7 +116,7 @@ class ControlPanel(QWidget):
         slm_scroll_layout.addWidget(cw.LabelWidget(str('Offset Y')), 3, 1, 1, 1)
         slm_scroll_layout.addWidget(self.QSpinBox_SLM_OffsetY, 3, 2, 1, 1)
         slm_scroll_layout.addWidget(cw.LabelWidget(str('Focal Length')), 4, 1, 1, 1)
-        slm_scroll_layout.addWidget(self.DoubleSpinBo_SLM_Focal, 4, 2, 1, 1)
+        slm_scroll_layout.addWidget(self.QDoubleSpinBox_SLM_Focal, 4, 2, 1, 1)
 
         group_layout = QHBoxLayout(group)
         group_layout.addWidget(slm_scroll_area)
@@ -126,17 +128,24 @@ class ControlPanel(QWidget):
         self.QPushButton_CGH_Pick.clicked.connect(self.pick_spot)
         self.QPushButton_CGH_Compute.clicked.connect(self.compute_cgh)
         self.QPushButton_CGH_Save.clicked.connect(self.save_pattern)
+        self.QPushButton_SLM_Correction.clicked.connect(self.set_slm_correction)
         self.QPushButton_SLM_Load.clicked.connect(self.load_slm_pattern)
         self.QPushButton_SLM_Set.clicked.connect(self.set_slm_pattern)
 
-    @pyqtSlot()
-    def load_target(self):
+    def get_file_name(self):
         selected_file = select_file_from_folder(None, self.data_folder)
         if not selected_file:
             self.logg.error("No file selected.")
+            return None
         else:
             self.logg.info(f"Selected file: {selected_file}")
-            self.Signal_load_target.emit(str(selected_file))
+            return selected_file
+
+    @pyqtSlot()
+    def load_target(self):
+        file_name = self.get_file_name()
+        if file_name is not None:
+            self.Signal_load_target.emit(str(file_name))
 
     @pyqtSlot()
     def pick_spot(self):
@@ -163,6 +172,12 @@ class ControlPanel(QWidget):
         refresh_gui()
 
     @pyqtSlot()
+    def set_slm_correction(self):
+        file_name = self.get_file_name()
+        if file_name is not None:
+            self.Signal_slm_correction.emit(str(file_name))
+
+    @pyqtSlot()
     def load_slm_pattern(self):
         selected_file = select_file_from_folder(None, self.data_folder)
         if not selected_file:
@@ -177,8 +192,13 @@ class ControlPanel(QWidget):
 
     def get_cgh_parameters(self):
         n  = self.QSpinBox_CGH_Iteration.value()
-        m = self.QSpinBox_CGH_Magnification.value()
-        f = self.DoubleSpinBo_SLM_Focal.value()
+        m = self.QDoubleSpinBox_CGH_Magnification.value()
         c0 = self.QSpinBox_CGH_CenterX.value()
         c1 = self.QSpinBox_CGH_CenterY.value()
-        return n, m, f, (c0, c1)
+        return n, m, (c0, c1)
+
+    def get_slm_parameters(self):
+        ox = self.QSpinBox_SLM_OffsetX.value()
+        oy = self.QSpinBox_SLM_OffsetY.value()
+        f = self.QDoubleSpinBox_SLM_Focal.value()
+        return ox, oy, f
