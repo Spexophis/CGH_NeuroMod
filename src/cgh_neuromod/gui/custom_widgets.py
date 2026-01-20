@@ -431,6 +431,20 @@ class DialogWidget(QtWidgets.QDialog):
             event.ignore()
 
 
+class LineEditWidget(QtWidgets.QLineEdit):
+    def __init__(self, rd=False):
+        super().__init__()
+        self.setFont(QtGui.QFont("Arial", 10, QtGui.QFont.Weight.Bold))
+        self.setStyleSheet('''
+            QLineEdit {
+                background-color: #444444;
+                color: white;
+            }
+        ''')
+        if rd:
+            self.setReadOnly(True)
+
+
 def create_scroll_area(layout="F"):
     scroll_area = ScrollAreaWidget()
     content_widget = QtWidgets.QWidget(scroll_area)

@@ -37,6 +37,7 @@ class ControlPanel(QWidget):
     Signal_slm_correction = pyqtSignal(str)
     Signal_slm_load = pyqtSignal(str)
     Signal_slm_set = pyqtSignal()
+    Signal_set_laser = pyqtSignal(bool, bool, float)
 
     def __init__(self, df, logg=None, parent=None, *args, **kwargs):
         super().__init__(parent, *args, **kwargs)
@@ -50,9 +51,11 @@ class ControlPanel(QWidget):
 
         self.cgh_panel = self._create_cgh_panel()
         self.slm_panel = self._create_slm_panel()
+        self.laser_panel = self._create_laser_panel()
 
         main_layout.addWidget(self.cgh_panel)
         main_layout.addWidget(self.slm_panel)
+        main_layout.addWidget(self.laser_panel)
 
         self.dialog, self.dialog_text = cw.create_dialog(labtex=True, interrupt=False)
         self.dialog.setModal(True)
@@ -99,7 +102,7 @@ class ControlPanel(QWidget):
 
         self.QPushButton_SLM_Correction = cw.PushButtonWidget('Load Correction')
         self.QPushButton_SLM_Load = cw.PushButtonWidget('Load Pattern')
-        self.QPushButton_SLM_Set = cw.PushButtonWidget('Apply Pattern')
+        self.QLineEdit_SLM_Pattern = cw.LineEditWidget('Pattern')
         self.QSpinBox_SLM_OffsetX = cw.SpinBoxWidget(0, 1024, 1, 0)
         self.QSpinBox_SLM_OffsetY = cw.SpinBoxWidget(0, 1024, 1, 0)
         self.QDoubleSpinBox_SLM_Focal = cw.DoubleSpinBoxWidget(0, 2000, 1, 2, 180)
@@ -108,7 +111,7 @@ class ControlPanel(QWidget):
         slm_scroll_layout.addWidget(cw.FrameWidget(), 1, 0, 1, 3)
         slm_scroll_layout.addWidget(self.QPushButton_SLM_Correction, 2, 0, 1, 1)
         slm_scroll_layout.addWidget(self.QPushButton_SLM_Load, 3, 0, 1, 1)
-        slm_scroll_layout.addWidget(self.QPushButton_SLM_Set, 4, 0, 1, 1)
+        slm_scroll_layout.addWidget(self.QLineEdit_SLM_Pattern, 4, 0, 1, 1)
         slm_scroll_layout.addWidget(cw.LabelWidget(str('Offset X')), 2, 1, 1, 1)
         slm_scroll_layout.addWidget(self.QSpinBox_SLM_OffsetX, 2, 2, 1, 1)
         slm_scroll_layout.addWidget(cw.LabelWidget(str('Offset Y')), 3, 1, 1, 1)
@@ -123,6 +126,25 @@ class ControlPanel(QWidget):
         group.setLayout(group_layout)
         return group
 
+    def _create_laser_panel(self):
+        group = cw.GroupWidget()
+        laser_scroll_area, laser_scroll_layout = cw.create_scroll_area("G")
+
+        self.QRadioButton_laser_473 = cw.RadioButtonWidget('473 nm')
+        self.QDoubleSpinBox_laser_power_473 = cw.DoubleSpinBoxWidget(0, 200, 0.1, 1, 0.0)
+        self.QPushButton_laser_473 = cw.PushButtonWidget('ON', checkable=True)
+
+        laser_scroll_layout.addWidget(cw.LabelWidget(str('Cobolt Laser - 471 nm')), 0, 0, 1, 1)
+        laser_scroll_layout.addWidget(cw.FrameWidget(), 1, 0, 1, 3)
+        laser_scroll_layout.addWidget(self.QRadioButton_laser_473, 2, 0, 1, 1)
+        laser_scroll_layout.addWidget(self.QDoubleSpinBox_laser_power_473, 2, 1, 1, 1)
+        laser_scroll_layout.addWidget(self.QPushButton_laser_473, 2, 2, 1, 1)
+
+        group_layout = QHBoxLayout(group)
+        group_layout.addWidget(laser_scroll_area)
+        group.setLayout(group_layout)
+        return group
+
     def _set_signal_connections(self):
         self.QPushButton_CGH_Load.clicked.connect(self.load_target)
         self.QPushButton_CGH_Pick.clicked.connect(self.pick_spot)
@@ -130,7 +152,7 @@ class ControlPanel(QWidget):
         self.QPushButton_CGH_Save.clicked.connect(self.save_pattern)
         self.QPushButton_SLM_Correction.clicked.connect(self.set_slm_correction)
         self.QPushButton_SLM_Load.clicked.connect(self.load_slm_pattern)
-        self.QPushButton_SLM_Set.clicked.connect(self.set_slm_pattern)
+        self.QPushButton_laser_473.clicked.connect(self.set_laser_473)
 
     def get_file_name(self):
         selected_file = select_file_from_folder(None, self.data_folder)
@@ -179,16 +201,10 @@ class ControlPanel(QWidget):
 
     @pyqtSlot()
     def load_slm_pattern(self):
-        selected_file = select_file_from_folder(None, self.data_folder)
-        if not selected_file:
-            self.logg.error("No file selected.")
-        else:
-            self.logg.info(f"Selected file: {selected_file}")
-            self.Signal_slm_load.emit(str(selected_file))
-
-    @pyqtSlot()
-    def set_slm_pattern(self):
-        self.Signal_slm_set.emit()
+        file_name = self.get_file_name()
+        if file_name is not None:
+            self.QLineEdit_SLM_Pattern.setText(str(file_name))
+            self.Signal_slm_load.emit(str(file_name))
 
     def get_cgh_parameters(self):
         n  = self.QSpinBox_CGH_Iteration.value()
@@ -202,3 +218,9 @@ class ControlPanel(QWidget):
         oy = self.QSpinBox_SLM_OffsetY.value()
         f = self.QDoubleSpinBox_SLM_Focal.value()
         return ox, oy, f
+
+    @pyqtSlot(bool)
+    def set_laser_473(self, checked: bool):
+        hdl = self.QRadioButton_laser_473.isChecked()
+        power = self.QDoubleSpinBox_laser_power_473.value()
+        self.Signal_set_laser.emit(hdl, checked, power)

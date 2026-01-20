@@ -36,6 +36,8 @@ class CommandExecutor(QObject):
         self.ctrl_panel.Signal_compute_cgh.connect(self.run_cgh_computation)
         self.ctrl_panel.Signal_save_pattern.connect(self.save_cgh_pattern)
         self.ctrl_panel.Signal_slm_correction.connect(self.load_slm_correction)
+        self.ctrl_panel.Signal_slm_load.connect(self.load_slm_pattern)
+        self.ctrl_panel.Signal_set_laser.connect(self.set_laser)
         self.task_finished.connect(self.show_cgh_pattern)
         self.viewer.spots_picked.connect(self.cgh.load_spots_picked)
 
@@ -94,3 +96,19 @@ class CommandExecutor(QObject):
     def load_slm_correction(self, fd: str):
         self.cgh.load_correction_pattern(fd)
         self.viewer.set_pattern_image(self.cgh.device.correction_pattern)
+
+    @pyqtSlot(str)
+    def load_slm_pattern(self, fd: str):
+        self.devs.slm.load_pattern(fd)
+        self.viewer.set_pattern_image(self.cgh.device.correction_pattern)
+
+    @pyqtSlot(bool, bool, float)
+    def set_laser(self, mod, sw, pw):
+        if mod:
+            self.devs.ls.set_modulation_mode(pw)
+        else:
+            self.devs.ls.set_constant_power(sw)
+        if sw:
+            self.devs.ls.laser_on()
+        else:
+            self.devs.ls.laser_off()

@@ -3,7 +3,7 @@
 # Licensed under the MIT License.
 
 
-from . import hamamatsu_slm
+from . import hamamatsu_slm, cobolt_laser
 from cgh_neuromod import logger
 
 class DeviceManager:
@@ -12,6 +12,10 @@ class DeviceManager:
         self.data_folder = path
         try:
             self.slm = hamamatsu_slm.HamamatsuSLM(lib_path=None, logg=self.logg)
+        except Exception as e:
+            self.logg.error(f"{e}")
+        try:
+            self.ls = cobolt_laser.CoboltLaser(serial=None, logg=self.logg)
         except Exception as e:
             self.logg.error(f"{e}")
         self.logg.info("Finish initiating devices")

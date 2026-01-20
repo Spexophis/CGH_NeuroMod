@@ -2,9 +2,8 @@
 # Copyright (c) 2025 Ruizhe Lin
 # Licensed under the MIT License.
 
-
-import os
-
+import numpy as np
+from PIL import Image
 import ctypes as ct
 from ctypes import c_int32, c_uint8, c_uint32, c_double, c_char, POINTER, create_string_buffer
 
@@ -27,6 +26,7 @@ class HamamatsuSLM:
                     self.nx = 1272
                     self.ny = 1024
                     self.array_size = self.nx * self.ny
+                    self.pattern = np.zeros((self.nx, self.ny), dtype=np.uint8)
                 else:
                     self.logg.error(f"No devices found")
             else:
@@ -106,8 +106,14 @@ class HamamatsuSLM:
         else:
             return None
 
-    def load_pattern(self, pattern, slot_no=0):
-        array = pattern.flatten()
+    def read_pattern(self, file):
+        pattern = Image.open(file)
+        self.pattern = np.array(pattern, dtype=np.uint8)
+
+    def load_pattern(self, pfd, slot_no=0):
+        self.read_pattern(pfd)
+        self.display_pattern(slot_no)
+        array = self.pattern.flatten()
         if len(array) != self.array_size:
             raise ValueError(
                 f"Array length {len(array)} does not match expected size {self.array_size})"
