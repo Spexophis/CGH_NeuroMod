@@ -51,6 +51,10 @@ class HamamatsuSLM:
         self.lib.Write_FMemArray.argtypes = [c_uint8, POINTER(c_uint8), c_int32, c_uint32, c_uint32, c_uint32]
         self.lib.Write_FMemArray.restype = c_int32
 
+        # Write_FMemBMPPath
+        self.lib.Write_FMemBMPPath.argtypes = [c_uint8, POINTER(c_char), c_int32]
+        self.lib.Write_FMemBMPPath.restype = c_int32
+
         # Check_Temp
         self.lib.Check_Temp.argtypes = [c_uint8, POINTER(c_double), POINTER(c_double)]
         self.lib.Check_Temp.restype = c_int32
@@ -62,6 +66,10 @@ class HamamatsuSLM:
         # Mode_Check
         self.lib.Mode_Check.argtypes = [c_uint8, POINTER(c_uint32)]
         self.lib.Mode_Check.restype = c_int32
+
+        # Change_DispSlot
+        self.lib.Change_DispSlot.argtypes = [c_uint8, c_int32]
+        self.lib.Change_DispSlot.restype = c_int32
 
     def open(self):
         size = 8
