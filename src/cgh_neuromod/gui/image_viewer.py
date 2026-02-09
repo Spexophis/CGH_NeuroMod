@@ -6,11 +6,12 @@
 import numpy as np
 import pyqtgraph as pg
 from PyQt6.QtCore import Qt, QEvent, pyqtSignal
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QSplitter, QHBoxLayout
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QSplitter, QHBoxLayout, QLabel
 from cgh_neuromod import logger
+from . import custom_widgets as cw
 
 class ImgViewer(QWidget):
-    spots_picked = pyqtSignal(list)
+    spots_picked = pyqtSignal(list)  # Emits list of (x, y, z, intensity) tuples
 
     def __init__(self, logg, parent=None):
         super().__init__(parent)
@@ -19,7 +20,7 @@ class ImgViewer(QWidget):
         self._target_img = None
         self._picking_enabled = False
         self._picking_n = None
-        self.target_points = []
+        self.target_points = []  # List of (x, y, z, intensity) tuples
 
         self.target_plot.scene().sigMouseClicked.connect(self._on_target_mouse_clicked)
         self.target_plot.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
@@ -27,6 +28,9 @@ class ImgViewer(QWidget):
 
         self.target_spots_item = pg.ScatterPlotItem(size=10, pen=pg.mkPen(width=2))
         self.target_plot.addItem(self.target_spots_item)
+
+        # Connect table changes to update overlay and emit signal
+        self.spot_table.spots_changed.connect(self._on_table_spots_changed)
 
 
     def _setup_ui(self):
@@ -37,6 +41,20 @@ class ImgViewer(QWidget):
         plot_layout = self._create_plot_widgets()
         plot_widget.setLayout(plot_layout)
         splitter.addWidget(plot_widget)
+
+        # Add spot table widget
+        table_widget = QWidget()
+        table_layout = QVBoxLayout(table_widget)
+        table_label = QLabel("Spot Coordinates (editable - press Delete to remove selected row)")
+        table_label.setStyleSheet("color: #CCCCCC; font-weight: bold; padding: 4px;")
+        self.spot_table = cw.SpotTableWidget()
+        table_layout.addWidget(table_label)
+        table_layout.addWidget(self.spot_table)
+        table_widget.setLayout(table_layout)
+        splitter.addWidget(table_widget)
+
+        # Set initial splitter sizes (plots larger than table)
+        splitter.setSizes([400, 150])
 
         layout.addWidget(splitter)
         self.setLayout(layout)
@@ -83,9 +101,9 @@ class ImgViewer(QWidget):
     def start_target_picking(self):
         print("Start picking...")
         self._picking_enabled = True
-        self._picking_enabled = True
 
         self.target_points = []
+        self.spot_table.clear_spots()
         self._update_target_spots_overlay()
 
         self.target_plot.setFocus()
@@ -98,6 +116,8 @@ class ImgViewer(QWidget):
         self.target_plot.unsetCursor()
         self._update_pick_status(done=True)
 
+        # Get the latest data from the table (in case user edited values)
+        self.target_points = self.spot_table.get_spots()
         pts = list(self.target_points)
         self.spots_picked.emit(pts)
 
@@ -144,7 +164,9 @@ class ImgViewer(QWidget):
 
         u = int(round(x))
         v = int(round(y))
-        self.target_points.append((u, v))
+        # Store as (x, y, z, intensity) with default z=0 and intensity=1.0
+        self.target_points.append((u, v, 0.0, 1.0))
+        self.spot_table.add_spot(u, v, 0.0, 1.0)
         self._update_target_spots_overlay()
         self._update_pick_status()
 
@@ -155,6 +177,12 @@ class ImgViewer(QWidget):
         xs = [p[0] for p in self.target_points]
         ys = [p[1] for p in self.target_points]
         self.target_spots_item.setData(xs, ys)
+
+    def _on_table_spots_changed(self, spots):
+        """Handle changes from the spot table (user edits)."""
+        self.target_points = spots
+        self._update_target_spots_overlay()
+        self._update_pick_status()
 
     def eventFilter(self, obj, event):
         if obj is self.target_plot and self._picking_enabled:
@@ -168,7 +196,9 @@ class ImgViewer(QWidget):
                 if key == Qt.Key.Key_Backspace:
                     if self.target_points:
                         self.target_points.pop()
+                        self.spot_table.remove_last_spot()
                         self._update_target_spots_overlay()
+                        self._update_pick_status()
                     return True
 
                 if key == Qt.Key.Key_Escape:

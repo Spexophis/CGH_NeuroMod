@@ -475,3 +475,152 @@ def create_dialog(labtex=False, interrupt=False):
         return dialogue, label
     else:
         return dialogue
+
+
+class SpotTableWidget(QtWidgets.QTableWidget):
+    """Interactive table for displaying and editing spot coordinates and intensity."""
+    spots_changed = QtCore.pyqtSignal(list)  # Emits list of (x, y, z, intensity) tuples
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._setup_table()
+        self._setup_style()
+        self.itemChanged.connect(self._on_item_changed)
+        self._updating = False  # Flag to prevent signal loops
+
+    def _setup_table(self):
+        self.setColumnCount(4)
+        self.setHorizontalHeaderLabels(['X', 'Y', 'Z', 'Intensity'])
+        self.horizontalHeader().setStretchLastSection(True)
+        self.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.Stretch)
+        self.verticalHeader().setVisible(True)
+        self.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
+        self.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
+        self.setMinimumHeight(120)
+        self.setMaximumHeight(200)
+
+    def _setup_style(self):
+        self.setFont(QtGui.QFont("Arial", 10, QtGui.QFont.Weight.Bold))
+        self.setStyleSheet('''
+            QTableWidget {
+                background-color: #1E1E1E;
+                color: #FFFFFF;
+                gridline-color: #333333;
+                border: 1px solid #333333;
+                border-radius: 2px;
+            }
+            QTableWidget::item {
+                padding: 4px;
+                border-bottom: 1px solid #333333;
+            }
+            QTableWidget::item:selected {
+                background-color: #4169e1;
+            }
+            QTableWidget::item:hover {
+                background-color: #2a2a2a;
+            }
+            QHeaderView::section {
+                background-color: #121212;
+                color: #FFFFFF;
+                padding: 4px;
+                border: 1px solid #333333;
+                font-weight: bold;
+            }
+            QTableCornerButton::section {
+                background-color: #121212;
+                border: 1px solid #333333;
+            }
+        ''')
+
+    def set_spots(self, spots):
+        """Set spots from a list of (x, y) or (x, y, z) or (x, y, z, intensity) tuples."""
+        self._updating = True
+        self.setRowCount(len(spots))
+        for row, spot in enumerate(spots):
+            x = spot[0] if len(spot) > 0 else 0
+            y = spot[1] if len(spot) > 1 else 0
+            z = spot[2] if len(spot) > 2 else 0.0
+            intensity = spot[3] if len(spot) > 3 else 1.0
+
+            self._set_cell(row, 0, x, is_int=True)
+            self._set_cell(row, 1, y, is_int=True)
+            self._set_cell(row, 2, z, is_int=False)
+            self._set_cell(row, 3, intensity, is_int=False)
+        self._updating = False
+
+    def _set_cell(self, row, col, value, is_int=False):
+        if is_int:
+            text = str(int(value))
+        else:
+            text = f"{float(value):.2f}"
+        item = QtWidgets.QTableWidgetItem(text)
+        item.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self.setItem(row, col, item)
+
+    def get_spots(self):
+        """Return list of (x, y, z, intensity) tuples from the table."""
+        spots = []
+        for row in range(self.rowCount()):
+            try:
+                x = int(self.item(row, 0).text()) if self.item(row, 0) else 0
+                y = int(self.item(row, 1).text()) if self.item(row, 1) else 0
+                z = float(self.item(row, 2).text()) if self.item(row, 2) else 0.0
+                intensity = float(self.item(row, 3).text()) if self.item(row, 3) else 1.0
+                spots.append((x, y, z, intensity))
+            except ValueError:
+                continue
+        return spots
+
+    def _on_item_changed(self, item):
+        if self._updating:
+            return
+        # Validate and emit updated spots
+        row = item.row()
+        col = item.column()
+        try:
+            if col in (0, 1):  # X, Y should be integers
+                value = int(float(item.text()))
+                item.setText(str(value))
+            else:  # Z, Intensity should be floats
+                value = float(item.text())
+                item.setText(f"{value:.2f}")
+        except ValueError:
+            # Restore default value on invalid input
+            if col in (0, 1):
+                item.setText("0")
+            elif col == 2:
+                item.setText("0.00")
+            else:
+                item.setText("1.00")
+        self.spots_changed.emit(self.get_spots())
+
+    def add_spot(self, x, y, z=0.0, intensity=1.0):
+        """Add a single spot to the table."""
+        self._updating = True
+        row = self.rowCount()
+        self.insertRow(row)
+        self._set_cell(row, 0, x, is_int=True)
+        self._set_cell(row, 1, y, is_int=True)
+        self._set_cell(row, 2, z, is_int=False)
+        self._set_cell(row, 3, intensity, is_int=False)
+        self._updating = False
+
+    def remove_last_spot(self):
+        """Remove the last spot from the table."""
+        if self.rowCount() > 0:
+            self.removeRow(self.rowCount() - 1)
+
+    def clear_spots(self):
+        """Clear all spots from the table."""
+        self.setRowCount(0)
+
+    def keyPressEvent(self, event):
+        """Handle delete key to remove selected row."""
+        if event.key() == QtCore.Qt.Key.Key_Delete:
+            selected = self.selectedItems()
+            if selected:
+                row = selected[0].row()
+                self.removeRow(row)
+                self.spots_changed.emit(self.get_spots())
+        else:
+            super().keyPressEvent(event)

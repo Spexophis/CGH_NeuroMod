@@ -159,16 +159,40 @@ class CGH:
         self.mask = np.asarray(img)
 
     def load_spots_picked(self, spots_picked):
-        self.spots_xy = spots_picked
+        """
+        Load picked spots from the GUI.
+
+        Parameters
+        ----------
+        spots_picked : list of tuples
+            Can be (x, y), (x, y, z), or (x, y, z, intensity) format.
+            Will normalize to (x, y, z, intensity) internally.
+        """
+        self.spots_xy = []
+        for spot in spots_picked:
+            if len(spot) == 2:
+                self.spots_xy.append((spot[0], spot[1], 0.0, 1.0))
+            elif len(spot) == 3:
+                self.spots_xy.append((spot[0], spot[1], spot[2], 1.0))
+            else:
+                self.spots_xy.append((spot[0], spot[1], spot[2], spot[3]))
 
     def compute_cgh(self):
         spots_sample = []
-        for (u, v) in self.spots_xy:
+        weights = []
+        for spot in self.spots_xy:
+            u, v = spot[0], spot[1]
+            z = spot[2] if len(spot) > 2 else 0.0
+            intensity = spot[3] if len(spot) > 3 else 1.0
             x0, y0 = self.geom.pixels_to_sample(u, v)
-            spots_sample.append((x0, y0, 0.0))
-        phase_init = self.generate_cgh(spots_sample, include_defocus=False)
+            # z is in micrometers from the GUI, convert to meters
+            z_meters = z * 1e-6
+            spots_sample.append((x0, y0, z_meters))
+            weights.append(intensity)
+
+        phase_init = self.generate_cgh(spots_sample, weights=weights, include_defocus=True)
         sigma_spot = 0.1e-6
-        target_amp = self.build_target_amp_from_spots(spots_sample, sigma=sigma_spot, amp_per_spot=1.0)
+        target_amp = self.build_target_amp_from_spots(spots_sample, sigma=sigma_spot, amp_per_spot=1.0, weights=weights)
         self.phase_spots = self.gerchberg_saxton_with_target(target_amp, n_iters=128,
                                                              phase_init=phase_init, use_pupil_mask=True)
         phase_fresnel_lens = self.generate_fresnel_lens_phase()
@@ -253,7 +277,7 @@ class CGH:
         Ys = self.system.wavelength * self.system.f_obj * FY
         return Xs, Ys
 
-    def build_target_amp_from_spots(self, spots_sample, sigma=None, amp_per_spot=1.0):
+    def build_target_amp_from_spots(self, spots_sample, sigma=None, amp_per_spot=1.0, weights=None):
         """
         Build a target amplitude pattern in the sample plane
         (FFT domain of the SLM pupil) for a list of spots.
@@ -266,7 +290,9 @@ class CGH:
             If None: each spot is a single pixel.
             If float: Gaussian radius in meters (in sample plane).
         amp_per_spot : float
-            Amplitude per spot before normalization.
+            Base amplitude per spot before normalization.
+        weights : list of float or None
+            Optional intensity weights for each spot (default 1.0 for all).
 
         Returns
         -------
@@ -278,15 +304,19 @@ class CGH:
 
         target_amp = np.zeros((ny, nx), dtype=np.float32)
 
-        for (x0, y0, z0) in spots_sample:
+        if weights is None:
+            weights = [1.0] * len(spots_sample)
+
+        for (x0, y0, z0), w in zip(spots_sample, weights):
+            spot_amp = amp_per_spot * w
             if sigma is None:
                 # find nearest pixel on the sample grid
                 dist2 = (Xs - x0) ** 2 + (Ys - y0) ** 2
                 iy, ix = np.unravel_index(np.argmin(dist2), dist2.shape)
-                target_amp[iy, ix] += amp_per_spot
+                target_amp[iy, ix] += spot_amp
             else:
                 # Gaussian blob around the desired position
-                target_amp += amp_per_spot * np.exp(
+                target_amp += spot_amp * np.exp(
                     -((Xs - x0) ** 2 + (Ys - y0) ** 2) / (2.0 * sigma ** 2)
                 )
 
