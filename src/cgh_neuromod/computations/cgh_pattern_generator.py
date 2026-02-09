@@ -4,7 +4,6 @@
 
 
 from dataclasses import dataclass
-from typing import Tuple, List
 
 import numpy as np
 from PIL import Image
@@ -13,35 +12,46 @@ from cgh_neuromod import logger
 
 
 @dataclass
-class ImagingGeometry:
-    pixel_size_cam: float  # camera pixel size
-    mag_total: float  # imaging magnification to camera
-    flip_x: int = 1  # +1 or -1 to account for horizontal flips
-    flip_y: int = 1  # +1 or -1 to account for vertical flips
-    u0: int = 600  # center of the field in pixel coordinates.
-    v0: int = 395
-
-    def pixels_to_sample(self, u: float, v: float) -> Tuple[float, float]:
-        """
-        Convert camera pixel coordinates (u,v) to sample-plane coordinates (x0,y0) in [m].
-        """
-        du = (u - self.u0) * self.pixel_size_cam / self.mag_total
-        dv = (v - self.v0) * self.pixel_size_cam / self.mag_total
-        # apply flips if the axes are inverted
-        x0 = self.flip_x * du
-        y0 = self.flip_y * dv
-        return x0, y0
-
-
-@dataclass
-class MicroscopeSLMSystem:
+class HoloSystem:
     wavelength: float = 473e-9  # laser wavelength
     n_medium: float = 1.33  # water
     NA_obj: float = 1.0  # objective NA
     M_obj: float = 20.0  # objective magnification
+    
     f_tube: float = 180e-3  # tube lens focal length
-    f_fresnel: float = 150e-3  # tube lens focal length
+    _f_fresnel: float = 190e-3
+    f_1: float = 75e-3
+    f_2: float = 100e-3
     pupil_mag: float = 1
+
+    image_center_x: int = 600
+    image_center_y: int = 395
+    
+    slm_pixel_pitch: float = 12.5e-6  # SLM pixel size
+    slm_nx: int = 1024  # number of pixels in x
+    slm_ny: int = 1272  # number of pixels in y
+    slm_offset_x: int = 0
+    slm_offset_y: int = 0
+    phase_nx: int = 512
+    phase_ny: int = 512
+    correction_value: int = 137
+    _correction_pattern: np.ndarray = None
+
+    def __post_init__(self):
+        self.pupil_mag = (self.f_1/self.f_tube) * (self.f_fresnel/self.f_2)
+        self._correction_pattern = np.zeros((self.slm_ny, self.slm_nx), dtype=np.uint8)
+        self.phase_nx = int(np.ceil(self.pupil_radius_slm / self.slm_pixel_pitch))
+        self.phase_ny = int(np.ceil(self.pupil_radius_slm / self.slm_pixel_pitch))
+        self.phy, self.phx = np.meshgrid(np.arange(self.phase_ny), np.arange(self.phase_nx))
+
+    @property
+    def f_fresnel(self) -> float:
+        return self._f_fresnel
+
+    @f_fresnel.setter
+    def f_fresnel(self, value: float):
+        self._f_fresnel = value
+        self.pupil_mag = (self.f_1/self.f_tube) * (self.f_fresnel/self.f_2)
 
     @property
     def f_obj(self) -> float:
@@ -74,279 +84,66 @@ class MicroscopeSLMSystem:
         return self.pupil_radius_obj * self.pupil_magnification
 
     @property
-    def k(self) -> float:
-        """Vacuum wave number."""
-        return 2 * np.pi / self.wavelength
+    def correction_pattern(self) -> np.ndarray:
+        return self._correction_pattern
 
-
-@dataclass
-class SLMDevice:
-    slm_pixel_pitch: float = 12.5e-6  # SLM pixel size
-    slm_nx: int = 1024  # number of pixels in x
-    slm_ny: int = 1272  # number of pixels in y
-    correction_pattern: np.ndarray = None
-    correction_value: int = 137
-
-    def slm_coordinates(self):
-        """
-        Return SLM coordinate grids X, Y (meters), centered at (0,0).
-        Shape: (slm_ny, slm_nx).
-        """
-        x = (np.arange(self.slm_nx) - self.slm_nx / 2 + 0.5) * self.slm_pixel_pitch
-        y = (np.arange(self.slm_ny) - self.slm_ny / 2 + 0.5) * self.slm_pixel_pitch
-        X, Y = np.meshgrid(x, y)
-        return X, Y
-
-
-def phase_to_uint(phase_0_2pi: np.ndarray, levels) -> np.ndarray:
-    out = np.round((levels * phase_0_2pi / (2.0 * np.pi)))
-    return out.astype(np.uint8)
-
-
-def save_to_bmp(fn, data):
-    img = Image.fromarray(data, mode='L')
-    img.save(fn + r"_8bit.bmp", format='BMP')
+    @correction_pattern.setter
+    def correction_pattern(self, pattern: np.ndarray):
+        self._correction_pattern = pattern
 
 
 class CGH:
 
     def __init__(self, logg=None):
         self.logg = logg or logger.setup_logging()
-        self.system = MicroscopeSLMSystem(
-            wavelength=473e-9,
-            NA_obj=1.0,
-            n_medium=1.33,
-            M_obj=20.0,
-            f_tube=180e-3,
-            f_fresnel=150e-3
-        )
-        self.device = SLMDevice(
-            slm_pixel_pitch=12.5e-6,
-            slm_nx=1272,
-            slm_ny=1024,
-            correction_pattern=np.zeros((1024, 1272), dtype=np.uint8),
-            correction_value=137
-        )
-        self.geom = ImagingGeometry(
-            pixel_size_cam=6.5e-6,
-            mag_total=20.0,
-            flip_x=1,
-            flip_y=1,
-            u0 = 600,
-            v0 = 395
-        )
-        self.mask = None
+        self.holo_sys = HoloSystem()
         self.spots_xy = None
+        self.cell_mask = None
         self.itn = 64
-        self.phase_spots = None
-        self.phase_total = None
         self.phase_slm = None
+        self.phase_total = np.zeros((512, 512), dtype=np.uint8)
 
     def load_correction_pattern(self, file):
         correct_pattern = Image.open(file)
-        self.device.correction_pattern = np.array(correct_pattern, dtype=np.uint8)
+        self.holo_sys.correction_pattern = np.array(correct_pattern, dtype=np.uint8)
 
-    def update_parameters(self, itn, mag, fl, cnt):
+    def update_parameters(self, itn, fl, cnt, offset):
         self.itn = itn
-        self.geom.mag_total = mag
-        self.system.f_fresnel = fl
-        self.geom.u0, self.geom.v0 = cnt
+        self.holo_sys.f_fresnel = fl
+        self.holo_sys.image_center_x, self.holo_sys.image_center_y = cnt
+        self.holo_sys.slm_offset_x, self.holo_sys.slm_offset_y = offset
 
     def load_mask(self, fnd):
         img = Image.open(fnd)
         if img.mode != "1":
             img = img.convert("L")
-        self.mask = np.asarray(img)
+        self.cell_mask = np.asarray(img)
 
     def load_spots_picked(self, spots_picked):
         self.spots_xy = spots_picked
 
-    def compute_cgh(self):
-        spots_sample = []
-        for (u, v) in self.spots_xy:
-            x0, y0 = self.geom.pixels_to_sample(u, v)
-            spots_sample.append((x0, y0, 0.0))
-        phase_init = self.generate_cgh(spots_sample, include_defocus=False)
-        sigma_spot = 0.1e-6
-        target_amp = self.build_target_amp_from_spots(spots_sample, sigma=sigma_spot, amp_per_spot=1.0)
-        self.phase_spots = self.gerchberg_saxton_with_target(target_amp, n_iters=128,
-                                                             phase_init=phase_init, use_pupil_mask=True)
-        phase_fresnel_lens = self.generate_fresnel_lens_phase()
-        self.phase_total = (self.phase_spots + phase_fresnel_lens) % (2.0 * np.pi)
-        self.phase_slm = self.device.correction_pattern + phase_to_uint(self.phase_total, self.device.correction_value)
+    def build_target_from_spots(self, spots_sample):
+        target_amp = np.zeros((self.holo_sys.phase_ny, self.holo_sys.phase_nx), dtype=np.float32)
 
-    def save_cgh(self, fnd):
-        save_to_bmp(fnd, self.phase_slm)
+        for (xx, yy, zz, ii) in spots_sample:
+                target_amp[round(yy), round(xx)] = ii
 
-    def generate_cgh(self, spots_sample: List[Tuple[float, float, float]], weights: List[complex] = None,
-                     include_defocus: bool = True):
-        """
-        Compute a phase-only CGH for multiple spots in the sample.
-
-        Parameters
-        ----------
-        spots_sample : list of (x0, y0, z0)
-            Target spot coordinates in sample space.
-        weights : list of complex, optional
-            Complex weights for each spot (default 1+0j).
-        include_defocus : bool
-            If True, add paraxial quadratic defocus term.
-
-        Returns
-        -------
-        phase : ndarray (slm_ny, slm_nx)
-            Phase hologram [rad], in [0, 2π).
-        """
-        X_slm, Y_slm = self.device.slm_coordinates()
-
-        # Map SLM coordinates back to objective pupil
-        M_pupil = self.system.pupil_magnification
-        x_pupil = X_slm / M_pupil
-        y_pupil = Y_slm / M_pupil
-        r2_pupil = x_pupil ** 2 + y_pupil ** 2
-
-        # Pupil aperture mask
-        r_slm = np.sqrt(X_slm ** 2 + Y_slm ** 2)
-        pupil_mask = (r_slm <= self.system.pupil_radius_slm).astype(np.float32)
-
-        k = self.system.k
-        f_obj = self.system.f_obj
-
-        if weights is None:
-            weights = [1.0] * len(spots_sample)
-
-        field = np.zeros_like(X_slm, dtype=np.complex64)
-
-        for (x0, y0, z0), w in zip(spots_sample, weights):
-            phi = k * (x0 * x_pupil + y0 * y_pupil) / f_obj
-
-            if include_defocus and np.abs(z0) > 0:
-                phi += -k * z0 * r2_pupil / (2.0 * f_obj ** 2)
-
-            field += w * np.exp(1j * phi)
-
-        field *= pupil_mask
-        phase = np.angle(field)
-        phase = (phase + 2.0 * np.pi) % (2.0 * np.pi)
-        return phase
-
-    def sample_plane_coordinates_fft_grid(self):
-        """
-        Sample-plane coordinates (x_s, y_s) corresponding to the FFT grid
-
-        Returns
-        -------
-        Xs, Ys : 2D arrays [m]
-            Coordinates in the sample plane at nominal focus (z=0).
-            Shape = (slm_ny, slm_nx)
-        """
-        ny, nx = self.device.slm_ny, self.device.slm_nx
-        dx_slm = self.device.slm_pixel_pitch
-
-        fx = np.fft.fftfreq(nx, d=dx_slm)
-        fy = np.fft.fftfreq(ny, d=dx_slm)
-        fx = np.fft.fftshift(fx)
-        fy = np.fft.fftshift(fy)
-
-        FX, FY = np.meshgrid(fx, fy)
-        Xs = self.system.wavelength * self.system.f_obj * FX
-        Ys = self.system.wavelength * self.system.f_obj * FY
-        return Xs, Ys
-
-    def build_target_amp_from_spots(self, spots_sample, sigma=None, amp_per_spot=1.0):
-        """
-        Build a target amplitude pattern in the sample plane
-        (FFT domain of the SLM pupil) for a list of spots.
-
-        Parameters
-        ----------
-        spots_sample : list of (x0, y0, z0) [m]
-            Target positions in the sample (z0 is currently ignored here).
-        sigma : float or None
-            If None: each spot is a single pixel.
-            If float: Gaussian radius in meters (in sample plane).
-        amp_per_spot : float
-            Amplitude per spot before normalization.
-
-        Returns
-        -------
-        target_amp : 2D array, shape (slm_ny, slm_nx)
-            Normalized amplitudes in [0,1].
-        """
-        ny, nx = self.device.slm_ny, self.device.slm_nx
-        Xs, Ys = self.sample_plane_coordinates_fft_grid()
-
-        target_amp = np.zeros((ny, nx), dtype=np.float32)
-
-        for (x0, y0, z0) in spots_sample:
-            if sigma is None:
-                # find nearest pixel on the sample grid
-                dist2 = (Xs - x0) ** 2 + (Ys - y0) ** 2
-                iy, ix = np.unravel_index(np.argmin(dist2), dist2.shape)
-                target_amp[iy, ix] += amp_per_spot
-            else:
-                # Gaussian blob around the desired position
-                target_amp += amp_per_spot * np.exp(
-                    -((Xs - x0) ** 2 + (Ys - y0) ** 2) / (2.0 * sigma ** 2)
-                )
-
-        max_val = target_amp.max()
-        if max_val > 0:
-            target_amp /= max_val
         return target_amp
 
-    def gerchberg_saxton_with_target(self, target_amp, n_iters=50, phase_init=None, use_pupil_mask=True):
-        """
-        Gerchberg–Saxton phase retrieval
-
-        Parameters
-        ----------
-        target_amp : 2D array (slm_ny, slm_nx)
-            Desired amplitude pattern
-        n_iters : int
-            Number of GS iterations.
-        phase_init : 2D array or None
-            Optional initial phase
-        use_pupil_mask : bool
-            If True, enforce the objective pupil aperture on the SLM.
-
-        Returns
-        -------
-        phase_slm : 2D array
-            Final SLM phase [rad], wrapped to [0, 2π).
-        """
-        ny, nx = self.device.slm_ny, self.device.slm_nx
-        assert target_amp.shape == (ny, nx), "target_amp must match SLM size"
-
-        if use_pupil_mask:
-            X_slm, Y_slm = self.device.slm_coordinates()
-            r2 = X_slm ** 2 + Y_slm ** 2
-            pupil_mask = (r2 <= self.system.pupil_radius_slm ** 2).astype(np.float32)
-        else:
-            pupil_mask = np.ones((ny, nx), dtype=np.float32)
-
-        if phase_init is None:
-            phase_slm = 2.0 * np.pi * np.random.rand(ny, nx)
-        else:
-            phase_slm = np.mod(phase_init, 2.0 * np.pi)
-
-        field_slm = np.exp(1j * phase_slm) * pupil_mask
-
-        for _ in range(n_iters):
-            field_focal = np.fft.fft2(field_slm)
-            field_focal = np.fft.fftshift(field_focal)
-
-            phase_focal = np.angle(field_focal)
-            field_focal = target_amp * np.exp(1j * phase_focal)
-
-            field_focal = np.fft.ifftshift(field_focal)
-            field_slm = np.fft.ifft2(field_focal)
-
-            phase_slm = np.angle(field_slm)
-            field_slm = np.exp(1j * phase_slm) * pupil_mask
-
-        phase_slm = (phase_slm + 2.0 * np.pi) % (2.0 * np.pi)
-        return phase_slm
+    def compute_cgh(self):
+        spots_sample = []
+        for (x0, y0, z0, I0) in self.spots_xy:
+            x1 = x0 - self.holo_sys.image_center_x + self.holo_sys.phase_nx / 2
+            y1 = y0 - self.holo_sys.image_center_y + self.holo_sys.phase_ny / 2
+            if x1 > 0 and y1 > 0:
+                spots_sample.append((x1, y1, z0, I0))
+        target_amp = self.build_target_from_spots(spots_sample)
+        phase_spots = self.gerchberg_saxton(target_amp)
+        phase_fresnel_lens = self.generate_fresnel_lens_phase()
+        phase_total = (phase_spots + phase_fresnel_lens) % (2.0 * np.pi)
+        phase_uint = self.phase_to_uint(phase_total, self.holo_sys.correction_value)
+        self.phase_slm = self.add_arrays(phase_uint, self.holo_sys.correction_pattern.copy(),
+                                         self.holo_sys.slm_offset_x, self.holo_sys.slm_offset_y)
 
     def generate_fresnel_lens_phase(self):
         """
@@ -358,11 +155,132 @@ class CGH:
             Phase map in radians, wrapped to [0, 2π)
         """
 
-        x = (np.arange(self.device.slm_nx) - self.device.slm_nx / 2 + 0.5) * self.device.slm_pixel_pitch
-        y = (np.arange(self.device.slm_ny) - self.device.slm_ny / 2 + 0.5) * self.device.slm_pixel_pitch
+        x = (np.arange(self.holo_sys.phase_nx) - self.holo_sys.phase_nx / 2 + 0.5) * self.holo_sys.slm_pixel_pitch
+        y = (np.arange(self.holo_sys.phase_ny) - self.holo_sys.phase_ny / 2 + 0.5) * self.holo_sys.slm_pixel_pitch
         X, Y = np.meshgrid(x, y)
-
-        k = 2.0 * np.pi / self.system.wavelength
-        phi = -k * (X ** 2 + Y ** 2) / (2.0 * self.system.f_fresnel)
+        k = 2.0 * np.pi / self.holo_sys.wavelength
+        phi = -k * (X ** 2 + Y ** 2) / (2.0 * self.holo_sys.f_fresnel)
         phase = np.mod(phi, 2.0 * np.pi)
         return phase
+
+    def gerchberg_saxton(self, target, weighted_gs=True, initial_phase=None):
+        """
+        Gerchberg-Saxton phase retrieval algorithm
+        Parameters:
+        -----------
+        target : ndarray
+            Target intensity pattern
+        weighted_gs : bool
+            Whether to use weighted GS algorithm
+        initial_phase : ndarray, optional
+            Initial phase guess
+        Returns:
+        --------
+        field_slm : ndarray
+            Complex field at SLM plane
+        performances : list
+            Performance metrics for each iteration
+        """
+        size = target.shape
+        performances = []
+        # Pre-allocate arrays
+        source = np.ones(size, dtype=complex)
+        sqrt_target = np.sqrt(target)
+        target_mask = target != 0
+        # Initialize phase
+        if initial_phase is not None:
+            phase_slm = initial_phase
+        else:
+            np.random.seed(1)
+            phase_slm = np.random.uniform(-np.pi, np.pi, size)
+        # Initialize weights for weighted GS
+        if weighted_gs:
+            weights = np.ones(size, dtype=float)
+        # Main iteration loop
+        for k in range(self.itn):
+            # Forward propagation
+            u = source * np.exp(1j * phase_slm)
+            v = np.fft.fftshift(np.fft.fft2(u))
+            # Extract amplitude and phase
+            amplitude = np.abs(v)
+            phase = np.angle(v)
+            # Calculate normalized intensity
+            I = amplitude ** 2
+            signal = self.normalize(I)
+            # Apply constraint in Fourier plane
+            if weighted_gs:
+                # Update weights only where target is non-zero
+                weights[target_mask] *= np.sqrt(target[target_mask] / np.maximum(signal[target_mask], 1e-10))
+                v = weights * sqrt_target * np.exp(1j * phase)
+            else:
+                v = sqrt_target * np.exp(1j * phase)
+            # Backward propagation
+            u = np.fft.ifft2(np.fft.ifftshift(v))
+            phase_slm = np.angle(u)
+            # Store performance metrics
+            self.logg.info(self.eval_performances(signal, target))
+        return phase_slm
+
+    def save_cgh(self, fnd):
+        self.save_to_bmp(fnd, self.phase_slm)
+
+    @staticmethod
+    def phase_to_uint(phase: np.ndarray, max_level: int) -> np.ndarray:
+        phase = phase % (2.0 * np.pi)
+        return np.round(phase * max_level / (2.0 * np.pi)).astype(np.uint8)
+
+    @staticmethod
+    def save_to_bmp(fn, data):
+        img = Image.fromarray(data, mode='L')
+        img.save(fn + r"_8bit.bmp", format='BMP')
+
+    @staticmethod
+    def normalize(array):
+        """Normalize array between [0, 1]"""
+        min_val = np.min(array)
+        max_val = np.max(array)
+        return (array - min_val) / (max_val - min_val)
+
+    @staticmethod
+    def eval_performances(signal, target):
+        """Evaluate the performances of GS algorithm"""
+        mask = target != 0
+        I = signal[mask]
+        efficiency = np.sum(I) / np.sum(signal)
+        Imax = np.max(I)
+        Imin = np.min(I)
+        uniformity = 1 - (Imax - Imin) / (Imax + Imin)
+        mean_I = np.mean(I)
+        std = np.std(I) / mean_I
+        return efficiency, uniformity, std
+
+    @staticmethod
+    def add_arrays(a: np.ndarray, b: np.ndarray, offset_x: int = 0, offset_y: int = 0):
+        """Add array a into array b, centered with offset. """
+        a_h, a_w = a.shape[:2]
+        b_h, b_w = b.shape[:2]
+
+        # Calculate center position in b
+        center_y = (b_h - a_h) // 2 + offset_y
+        center_x = (b_w - a_w) // 2 + offset_x
+
+        # Source (a) range
+        src_y_start = max(0, -center_y)
+        src_x_start = max(0, -center_x)
+        src_y_end = min(a_h, b_h - center_y)
+        src_x_end = min(a_w, b_w - center_x)
+
+        # Check if there's anything to copy
+        if src_y_start >= src_y_end or src_x_start >= src_x_end:
+            return b
+
+        # Destination (b) range
+        dst_y_start = max(0, center_y)
+        dst_x_start = max(0, center_x)
+        dst_y_end = dst_y_start + (src_y_end - src_y_start)
+        dst_x_end = dst_x_start + (src_x_end - src_x_start)
+
+        # Add a to b
+        b[dst_y_start:dst_y_end, dst_x_start:dst_x_end] += a[src_y_start:src_y_end, src_x_start:src_x_end]
+
+        return b

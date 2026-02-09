@@ -39,7 +39,6 @@ class CommandExecutor(QObject):
         self.ctrl_panel.Signal_slm_load.connect(self.load_slm_pattern)
         self.ctrl_panel.Signal_set_laser.connect(self.set_laser)
         self.task_finished.connect(self.show_cgh_pattern)
-        self.viewer.spots_picked.connect(self.cgh.load_spots_picked)
 
     def _initial_setup(self):
         try:
@@ -65,13 +64,15 @@ class CommandExecutor(QObject):
     @pyqtSlot(str)
     def load_cgh_target(self, fd):
         self.cgh.load_mask(fd)
-        self.viewer.set_target_image(self.cgh.mask)
+        self.viewer.set_target_image(self.cgh.cell_mask)
 
     @pyqtSlot()
     def update_cgh_parameters(self):
-        n, m, c = self.ctrl_panel.get_cgh_parameters()
+        n, c = self.ctrl_panel.get_cgh_parameters()
         o, f = self.ctrl_panel.get_slm_parameters()
-        self.cgh.update_parameters(n, m, f * 1e-3, c)
+        self.cgh.update_parameters(n, f * 1e-3, c, o)
+        pts = self.viewer.get_target_spots()
+        self.cgh.load_spots_picked(pts)
 
     @pyqtSlot(str)
     def save_cgh_pattern(self, fd):
@@ -79,7 +80,7 @@ class CommandExecutor(QObject):
 
     @pyqtSlot()
     def show_cgh_pattern(self):
-        self.viewer.set_pattern_image(self.cgh.phase_total)
+        self.viewer.set_pattern_image(self.cgh.phase_slm)
 
     def cgh_computation(self):
         try:
@@ -90,7 +91,7 @@ class CommandExecutor(QObject):
             return
 
     def run_cgh_computation(self):
-        self.run_task(task=self.cgh_computation)
+        self.run_task(task=self.cgh_computation, )
 
     @pyqtSlot(str)
     def load_slm_correction(self, fd: str):

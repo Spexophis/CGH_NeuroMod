@@ -116,8 +116,6 @@ class ControlPanel(QWidget):
         slm_scroll_layout.addWidget(self.QSpinBox_SLM_OffsetX, 2, 2, 1, 1)
         slm_scroll_layout.addWidget(cw.LabelWidget(str('Offset Y')), 3, 1, 1, 1)
         slm_scroll_layout.addWidget(self.QSpinBox_SLM_OffsetY, 3, 2, 1, 1)
-        slm_scroll_layout.addWidget(cw.LabelWidget(str('Offset Y')), 3, 1, 1, 1)
-        slm_scroll_layout.addWidget(self.QSpinBox_SLM_OffsetY, 3, 2, 1, 1)
         slm_scroll_layout.addWidget(cw.LabelWidget(str('Focal Length')), 4, 1, 1, 1)
         slm_scroll_layout.addWidget(self.QDoubleSpinBox_SLM_Focal, 4, 2, 1, 1)
 
@@ -208,16 +206,15 @@ class ControlPanel(QWidget):
 
     def get_cgh_parameters(self):
         n  = self.QSpinBox_CGH_Iteration.value()
-        m = self.QDoubleSpinBox_CGH_Magnification.value()
         c0 = self.QSpinBox_CGH_CenterX.value()
         c1 = self.QSpinBox_CGH_CenterY.value()
-        return n, m, (c0, c1)
+        return n, (c0, c1)
 
     def get_slm_parameters(self):
         ox = self.QSpinBox_SLM_OffsetX.value()
         oy = self.QSpinBox_SLM_OffsetY.value()
         f = self.QDoubleSpinBox_SLM_Focal.value()
-        return ox, oy, f
+        return (ox, oy), f
 
     @pyqtSlot(bool)
     def set_laser_473(self, checked: bool):

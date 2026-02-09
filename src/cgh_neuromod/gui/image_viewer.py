@@ -8,9 +8,9 @@ import pyqtgraph as pg
 from PyQt6.QtCore import Qt, QEvent, pyqtSignal
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QSplitter, QHBoxLayout
 from cgh_neuromod import logger
+from . import custom_widgets as cw
 
 class ImgViewer(QWidget):
-    spots_picked = pyqtSignal(list)
 
     def __init__(self, logg, parent=None):
         super().__init__(parent)
@@ -37,6 +37,11 @@ class ImgViewer(QWidget):
         plot_layout = self._create_plot_widgets()
         plot_widget.setLayout(plot_layout)
         splitter.addWidget(plot_widget)
+
+        table_widget = QWidget()
+        table_layout = self._create_table_widget()
+        table_widget.setLayout(table_layout)
+        splitter.addWidget(table_widget)
 
         layout.addWidget(splitter)
         self.setLayout(layout)
@@ -66,6 +71,15 @@ class ImgViewer(QWidget):
         layout_plot.addWidget(self.pattern_plot, stretch=1)
         return layout_plot
 
+    def _create_table_widget(self):
+        layout_table = QVBoxLayout()
+
+        self.spot_table = cw.TableWidget(headers=['X', 'Y', 'Z', 'Intensity'], n_rows=2)
+
+        layout_table.addWidget(cw.LabelWidget("Spot Coordinates"))
+        layout_table.addWidget(self.spot_table)
+        return layout_table
+
     def set_target_image(self, img2d: np.ndarray, levels=None):
         self._target_img = img2d
         self.target_img_item.setImage(img2d, autoLevels=(levels is None))
@@ -76,9 +90,11 @@ class ImgViewer(QWidget):
         self.target_plot.setRange(xRange=(0, w), yRange=(0, h), padding=0)
 
     def set_pattern_image(self, img2d: np.ndarray, levels=None):
+        self.pattern_img_item.clear()
         self.pattern_img_item.setImage(img2d, autoLevels=(levels is None))
         if levels is not None:
             self.pattern_img_item.setLevels(levels)
+        self.pattern_plot.update()
 
     def start_target_picking(self):
         print("Start picking...")
@@ -98,13 +114,13 @@ class ImgViewer(QWidget):
         self.target_plot.unsetCursor()
         self._update_pick_status(done=True)
 
-        pts = list(self.target_points)
-        self.spots_picked.emit(pts)
-
     def cancel_target_picking(self):
         self._picking_enabled = False
         self.target_plot.unsetCursor()
         self._update_pick_status(cancelled=True)
+
+    def get_target_spots(self):
+        return self.spot_table.get_row(-1)
 
     def _update_pick_status(self, done=False, cancelled=False):
         n = len(getattr(self, "target_points", []))
@@ -145,6 +161,7 @@ class ImgViewer(QWidget):
         u = int(round(x))
         v = int(round(y))
         self.target_points.append((u, v))
+        self.spot_table.fill_row(len(self.target_points) - 1, [u, v, 0.0, 1.0])
         self._update_target_spots_overlay()
         self._update_pick_status()
 
