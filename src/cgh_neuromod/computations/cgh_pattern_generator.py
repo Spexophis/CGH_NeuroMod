@@ -4,9 +4,11 @@
 
 
 from dataclasses import dataclass
+from typing import Tuple, List
 
 import numpy as np
 from PIL import Image
+from scipy import ndimage
 
 from cgh_neuromod import logger
 
@@ -17,7 +19,7 @@ class HoloSystem:
     n_medium: float = 1.33  # water
     NA_obj: float = 1.0  # objective NA
     M_obj: float = 20.0  # objective magnification
-    
+
     f_tube: float = 180e-3  # tube lens focal length
     _f_fresnel: float = 190e-3
     f_1: float = 75e-3
@@ -26,7 +28,7 @@ class HoloSystem:
 
     image_center_x: int = 600
     image_center_y: int = 395
-    
+
     slm_pixel_pitch: float = 12.5e-6  # SLM pixel size
     slm_nx: int = 1024  # number of pixels in x
     slm_ny: int = 1272  # number of pixels in y
@@ -38,7 +40,7 @@ class HoloSystem:
     _correction_pattern: np.ndarray = None
 
     def __post_init__(self):
-        self.pupil_mag = (self.f_1/self.f_tube) * (self.f_fresnel/self.f_2)
+        self.pupil_mag = (self.f_1 / self.f_tube) * (self.f_fresnel / self.f_2)
         self._correction_pattern = np.zeros((self.slm_ny, self.slm_nx), dtype=np.uint8)
         self.phase_nx = int(np.ceil(self.pupil_radius_slm / self.slm_pixel_pitch))
         self.phase_ny = int(np.ceil(self.pupil_radius_slm / self.slm_pixel_pitch))
@@ -51,7 +53,7 @@ class HoloSystem:
     @f_fresnel.setter
     def f_fresnel(self, value: float):
         self._f_fresnel = value
-        self.pupil_mag = (self.f_1/self.f_tube) * (self.f_fresnel/self.f_2)
+        self.pupil_mag = (self.f_1 / self.f_tube) * (self.f_fresnel / self.f_2)
 
     @property
     def f_obj(self) -> float:
@@ -122,22 +124,50 @@ class CGH:
     def load_spots_picked(self, spots_picked):
         self.spots_xy = spots_picked
 
-    def build_target_from_spots(self, spots_sample):
+    def build_target_from_spots(self, spots_sample, sigma=None):
         target_amp = np.zeros((self.holo_sys.phase_ny, self.holo_sys.phase_nx), dtype=np.float32)
 
-        for (xx, yy, zz, ii) in spots_sample:
+        if sigma is not None:
+            for (xx, yy, zz, ii) in spots_sample:
+                temp = ii * np.exp(
+                    -((self.holo_sys.phx - xx) ** 2 + (self.holo_sys.phy - yy) ** 2) / (2.0 * sigma ** 2))
+                target_amp += temp
+        else:
+            for (xx, yy, zz, ii) in spots_sample:
                 target_amp[round(yy), round(xx)] = ii
 
         return target_amp
 
+    def filter_mask_by_coords(self, spots_sample):
+        mask = self.cell_mask
+
+        binary = mask > 0
+        labeled, _ = ndimage.label(binary)
+
+        filtered = np.zeros(mask.shape)
+        for (xx, yy, zz, ii) in spots_sample:
+            cell_id = labeled[int(yy), int(xx)]
+            if cell_id > 0:
+                filtered += np.where(labeled == cell_id, ii, 0)
+
+        half_x0, half_x1 = self.holo_sys.phase_nx // 2, self.holo_sys.phase_nx - self.holo_sys.phase_nx // 2
+        half_y0, half_y1 = self.holo_sys.phase_ny // 2, self.holo_sys.phase_ny - self.holo_sys.phase_ny // 2
+        y_start = max(self.holo_sys.image_center_y - half_y0, 0)
+        y_end = min(self.holo_sys.image_center_y + half_y1, mask.shape[0])
+        x_start = max(self.holo_sys.image_center_x - half_x0, 0)
+        x_end = min(self.holo_sys.image_center_x + half_x1, mask.shape[1])
+
+        return filtered[y_start:y_end, x_start:x_end]
+
     def compute_cgh(self):
         spots_sample = []
-        for (x0, y0, z0, I0) in self.spots_xy:
-            x1 = x0 - self.holo_sys.image_center_x + self.holo_sys.phase_nx / 2
-            y1 = y0 - self.holo_sys.image_center_y + self.holo_sys.phase_ny / 2
-            if x1 > 0 and y1 > 0:
-                spots_sample.append((x1, y1, z0, I0))
-        target_amp = self.build_target_from_spots(spots_sample)
+        # for (x0, y0, z0, I0) in self.spots_xy:
+        #     x1 = x0 - self.holo_sys.image_center_x + self.holo_sys.phase_nx / 2
+        #     y1 = y0 - self.holo_sys.image_center_y + self.holo_sys.phase_ny / 2
+        #     if x1 > 0 and y1 > 0:
+        #         spots_sample.append((x1, y1, z0, I0))
+        # target_amp = self.build_target_from_spots(spots_sample)
+        target_amp = self.filter_mask_by_coords(self.spots_xy)
         phase_spots = self.gerchberg_saxton(target_amp)
         phase_fresnel_lens = self.generate_fresnel_lens_phase()
         phase_total = (phase_spots + phase_fresnel_lens) % (2.0 * np.pi)
@@ -161,6 +191,50 @@ class CGH:
         k = 2.0 * np.pi / self.holo_sys.wavelength
         phi = -k * (X ** 2 + Y ** 2) / (2.0 * self.holo_sys.f_fresnel)
         phase = np.mod(phi, 2.0 * np.pi)
+        return phase
+
+    def generate_cgh(self, spots_sample: List[Tuple[float, float, float, float]]):
+        """
+        Compute a phase-only CGH for multiple spots in the sample.
+
+        Parameters
+        ----------
+        spots_sample : list of (x0, y0, z0)
+            Target spot coordinates in sample space.
+        weights : list of complex, optional
+            Complex weights for each spot (default 1+0j).
+        include_defocus : bool
+            If True, add paraxial quadratic defocus term.
+
+        Returns
+        -------
+        phase : ndarray (slm_ny, slm_nx)
+            Phase hologram [rad], in [0, 2π).
+        """
+        X_slm, Y_slm = self.device.slm_coordinates()
+
+        # Map SLM coordinates back to objective pupil
+        M_pupil = self.system.pupil_magnification
+        x_pupil = X_slm / M_pupil
+        y_pupil = Y_slm / M_pupil
+        r2_pupil = x_pupil ** 2 + y_pupil ** 2
+
+        # Pupil aperture mask
+        r_slm = np.sqrt(X_slm ** 2 + Y_slm ** 2)
+        pupil_mask = (r_slm <= self.holo_sys.pupil_radius_slm).astype(np.float32)
+
+        k = self.system.k
+        f_obj = self.system.f_obj
+
+        field = np.zeros_like(X_slm, dtype=np.complex64)
+
+        for (x0, y0, z0, i0), w in zip(spots_sample):
+            phi = k * (x0 * x_pupil + y0 * y_pupil) / f_obj
+            phi += -k * z0 * r2_pupil / (2.0 * f_obj ** 2)
+            field += i0 * np.exp(1j * phi)
+
+        phase = np.angle(field)
+        phase = (phase + 2.0 * np.pi) % (2.0 * np.pi)
         return phase
 
     def gerchberg_saxton(self, target, weighted_gs=True, initial_phase=None):
