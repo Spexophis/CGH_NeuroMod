@@ -160,7 +160,7 @@ class CGH:
         return filtered[y_start:y_end, x_start:x_end]
 
     def compute_cgh(self):
-        spots_sample = []
+        # spots_sample = []
         # for (x0, y0, z0, I0) in self.spots_xy:
         #     x1 = x0 - self.holo_sys.image_center_x + self.holo_sys.phase_nx / 2
         #     y1 = y0 - self.holo_sys.image_center_y + self.holo_sys.phase_ny / 2
