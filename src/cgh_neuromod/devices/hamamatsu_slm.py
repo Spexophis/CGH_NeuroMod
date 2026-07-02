@@ -9,10 +9,11 @@ from ctypes import c_int32, c_uint8, c_uint32, c_double, c_char, POINTER, create
 
 from cgh_neuromod import logger
 
+lib_path = r"C:\Users\Janos\OneDrive\Asztali gép\Hamamatsu\USB_Control_SDK\hpkSLMdaLV_stdcall_64bit\hpkSLMdaLV.dll"
 
 class HamamatsuSLM:
 
-    def __init__(self, lib_path=None, serial_number=None, logg=None):
+    def __init__(self, serial_number=None, logg=None):
         self.logg = logg or logger.setup_logging()
         if lib_path is not None:
             self.lib = ct.CDLL(lib_path)

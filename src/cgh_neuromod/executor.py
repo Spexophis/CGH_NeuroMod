@@ -32,12 +32,12 @@ class CommandExecutor(QObject):
         return logging
 
     def _set_signal_executions(self):
+        self.ctrl_panel.Signal_set_laser.connect(self.set_laser)
         self.ctrl_panel.Signal_load_target.connect(self.load_cgh_target)
         self.ctrl_panel.Signal_compute_cgh.connect(self.run_cgh_computation)
         self.ctrl_panel.Signal_save_pattern.connect(self.save_cgh_pattern)
         self.ctrl_panel.Signal_slm_correction.connect(self.load_slm_correction)
         self.ctrl_panel.Signal_slm_load.connect(self.load_slm_pattern)
-        self.ctrl_panel.Signal_set_laser.connect(self.set_laser)
         self.task_finished.connect(self.show_cgh_pattern)
 
     def _initial_setup(self):
@@ -45,6 +45,19 @@ class CommandExecutor(QObject):
             self.logg.info("Finish setting up controllers")
         except Exception as e:
             self.logg.error(f"Initial setup Error: {e}")
+
+    @pyqtSlot(list, bool, float)
+    def set_laser(self, laser: list, sw: bool, pw: float):
+        if sw:
+            try:
+                self.devs.laser.set_constant_power(laser, [pw])
+            except Exception as e:
+                self.logg.error(f"Cobolt Laser Error: {e}")
+        else:
+            try:
+                self.devs.laser.set_modulation_mode(laser, [pw])
+            except Exception as e:
+                self.logg.error(f"Cobolt Laser Error: {e}")
 
     def run_task(self, task, iteration=1, parent=None):
         if getattr(self, "task_worker", None) is not None and self.task_worker.isRunning():
@@ -68,9 +81,9 @@ class CommandExecutor(QObject):
 
     @pyqtSlot()
     def update_cgh_parameters(self):
-        n, c = self.ctrl_panel.get_cgh_parameters()
+        n, m, c = self.ctrl_panel.get_cgh_parameters()
         o, f = self.ctrl_panel.get_slm_parameters()
-        self.cgh.update_parameters(n, f * 1e-3, c, o)
+        self.cgh.update_parameters(n, m, f * 1e-3, c, o)
         pts = self.viewer.get_target_spots()
         self.cgh.load_spots_picked(pts)
 
@@ -91,25 +104,13 @@ class CommandExecutor(QObject):
             return
 
     def run_cgh_computation(self):
-        self.run_task(task=self.cgh_computation, )
+        self.run_task(task=self.cgh_computation)
 
     @pyqtSlot(str)
     def load_slm_correction(self, fd: str):
         self.cgh.load_correction_pattern(fd)
-        self.viewer.set_pattern_image(self.cgh.device.correction_pattern)
 
     @pyqtSlot(str)
     def load_slm_pattern(self, fd: str):
         self.devs.slm.load_pattern(fd)
-        self.viewer.set_pattern_image(self.cgh.device.correction_pattern)
-
-    @pyqtSlot(bool, bool, float)
-    def set_laser(self, mod, sw, pw):
-        if mod:
-            self.devs.ls.set_modulation_mode(pw)
-        else:
-            self.devs.ls.set_constant_power(sw)
-        if sw:
-            self.devs.ls.laser_on()
-        else:
-            self.devs.ls.laser_off()
+        self.viewer.set_pattern_image(self.devs.slm.pattern)

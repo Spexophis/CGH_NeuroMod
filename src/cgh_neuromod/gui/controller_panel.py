@@ -37,7 +37,7 @@ class ControlPanel(QWidget):
     Signal_slm_correction = pyqtSignal(str)
     Signal_slm_load = pyqtSignal(str)
     Signal_slm_set = pyqtSignal()
-    Signal_set_laser = pyqtSignal(bool, bool, float)
+    Signal_set_laser = pyqtSignal(list, bool, float)
 
     def __init__(self, df, logg=None, parent=None, *args, **kwargs):
         super().__init__(parent, *args, **kwargs)
@@ -69,10 +69,10 @@ class ControlPanel(QWidget):
 
         self.QPushButton_CGH_Load = cw.PushButtonWidget('Load Target')
         self.QPushButton_CGH_Pick = cw.PushButtonWidget('Pick Spots')
-        self.QSpinBox_CGH_Iteration = cw.SpinBoxWidget(0, 1024, 1, 128)
-        self.QDoubleSpinBox_CGH_Magnification = cw.DoubleSpinBoxWidget(0, 128, 1, 1, 7)
-        self.QSpinBox_CGH_CenterX = cw.SpinBoxWidget(0, 2048, 1, 600)
-        self.QSpinBox_CGH_CenterY = cw.SpinBoxWidget(0, 2048, 1, 395)
+        self.QSpinBox_CGH_Iteration = cw.SpinBoxWidget(0, 128, 1, 32)
+        self.QDoubleSpinBox_CGH_Magnification = cw.DoubleSpinBoxWidget(0, 128, 0.5, 2, 0.6)
+        self.QSpinBox_CGH_CenterX = cw.SpinBoxWidget(0, 2048, 1, 500)
+        self.QSpinBox_CGH_CenterY = cw.SpinBoxWidget(0, 2048, 1, 460)
         self.QPushButton_CGH_Compute = cw.PushButtonWidget('Compute CGH')
         self.QPushButton_CGH_Save = cw.PushButtonWidget('Save CGH')
 
@@ -103,9 +103,9 @@ class ControlPanel(QWidget):
         self.QPushButton_SLM_Correction = cw.PushButtonWidget('Load Correction')
         self.QPushButton_SLM_Load = cw.PushButtonWidget('Load Pattern')
         self.QLineEdit_SLM_Pattern = cw.LineEditWidget('Pattern')
-        self.QSpinBox_SLM_OffsetX = cw.SpinBoxWidget(0, 1024, 1, 0)
-        self.QSpinBox_SLM_OffsetY = cw.SpinBoxWidget(0, 1024, 1, 0)
-        self.QDoubleSpinBox_SLM_Focal = cw.DoubleSpinBoxWidget(0, 2000, 1, 2, 180)
+        self.QSpinBox_SLM_OffsetX = cw.SpinBoxWidget(-512, 512, 1, -130)
+        self.QSpinBox_SLM_OffsetY = cw.SpinBoxWidget(-512, 512, 1, -50)
+        self.QDoubleSpinBox_SLM_Focal = cw.DoubleSpinBoxWidget(200, 1000, 1, 2, 450)
 
         slm_scroll_layout.addWidget(cw.LabelWidget(str('Hamamatsu SLM')), 0, 0, 1, 1)
         slm_scroll_layout.addWidget(cw.FrameWidget(), 1, 0, 1, 3)
@@ -132,7 +132,7 @@ class ControlPanel(QWidget):
         self.QDoubleSpinBox_laser_power_473 = cw.DoubleSpinBoxWidget(0, 200, 0.1, 1, 0.0)
         self.QPushButton_laser_473 = cw.PushButtonWidget('ON', checkable=True)
 
-        laser_scroll_layout.addWidget(cw.LabelWidget(str('Cobolt Laser - 471 nm')), 0, 0, 1, 1)
+        laser_scroll_layout.addWidget(cw.LabelWidget(str('Cobolt Laser - 473 nm')), 0, 0, 1, 1)
         laser_scroll_layout.addWidget(cw.FrameWidget(), 1, 0, 1, 3)
         laser_scroll_layout.addWidget(self.QRadioButton_laser_473, 2, 0, 1, 1)
         laser_scroll_layout.addWidget(self.QDoubleSpinBox_laser_power_473, 2, 1, 1, 1)
@@ -151,6 +151,11 @@ class ControlPanel(QWidget):
         self.QPushButton_SLM_Correction.clicked.connect(self.set_slm_correction)
         self.QPushButton_SLM_Load.clicked.connect(self.load_slm_pattern)
         self.QPushButton_laser_473.clicked.connect(self.set_laser_473)
+
+    @pyqtSlot(bool)
+    def set_laser_473(self, checked: bool):
+        power = self.QDoubleSpinBox_laser_power_473.value()
+        self.Signal_set_laser.emit(["473"], checked, power)
 
     def get_file_name(self):
         selected_file = select_file_from_folder(None, self.data_folder)
@@ -206,18 +211,13 @@ class ControlPanel(QWidget):
 
     def get_cgh_parameters(self):
         n  = self.QSpinBox_CGH_Iteration.value()
+        m = self.QDoubleSpinBox_CGH_Magnification.value()
         c0 = self.QSpinBox_CGH_CenterX.value()
         c1 = self.QSpinBox_CGH_CenterY.value()
-        return n, (c0, c1)
+        return n, m, (c0, c1)
 
     def get_slm_parameters(self):
         ox = self.QSpinBox_SLM_OffsetX.value()
         oy = self.QSpinBox_SLM_OffsetY.value()
         f = self.QDoubleSpinBox_SLM_Focal.value()
         return (ox, oy), f
-
-    @pyqtSlot(bool)
-    def set_laser_473(self, checked: bool):
-        hdl = self.QRadioButton_laser_473.isChecked()
-        power = self.QDoubleSpinBox_laser_power_473.value()
-        self.Signal_set_laser.emit(hdl, checked, power)

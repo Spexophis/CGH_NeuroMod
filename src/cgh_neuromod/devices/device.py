@@ -11,23 +11,20 @@ class DeviceManager:
         self.logg = logg or logger.setup_logging()
         self.data_folder = path
         try:
-            self.slm = hamamatsu_slm.HamamatsuSLM(lib_path=None, logg=self.logg)
+            self.slm = hamamatsu_slm.HamamatsuSLM(serial_number="LSH0805629", logg=self.logg)
         except Exception as e:
             self.logg.error(f"{e}")
         try:
-            self.ls = cobolt_laser.CoboltLaser(serial=None, logg=self.logg)
+            self.laser = cobolt_laser.CoboltLaser(logg=self.logg)
         except Exception as e:
-            self.logg.error(f"{e}")
-        self.logg.info("Finish initiating devices")
+            self.logg.error(f"Laser init failed: {e}")
 
     def close(self):
         try:
             self.slm.close()
         except Exception as e:
             self.logg.error(f"{e}")
-
-    @staticmethod
-    def setup_logging():
-        import logging
-        logging.basicConfig(format='%(levelname)s: %(message)s', level=logging.INFO)
-        return logging
+        try:
+            self.laser.close()
+        except Exception as e:
+            self.logg.error(f"{e}")
